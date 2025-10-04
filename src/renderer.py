@@ -122,9 +122,10 @@ class Renderer:
             self._draw_rotated_rect(self.screen, (constants.SHOULDER_WIDTH, constants.TORSO_DEPTH), agent.position, -body_angle_deg - 90, torso_color)
             
             # Neck and Head
-            neck_pos = agent.position + agent.heading_vector * (constants.TORSO_DEPTH / 2)
+            # Reduce the offset to bring the head closer to the body's center.
+            head_pos = agent.position + agent.heading_vector * (constants.TORSO_DEPTH * 0.6)
+            neck_pos = agent.position + agent.heading_vector * (constants.TORSO_DEPTH * 0.3)
             self._draw_rotated_rect(self.screen, (constants.NECK_WIDTH, constants.NECK_HEIGHT), neck_pos, math.degrees(math.atan2(agent.heading_vector[1], agent.heading_vector[0])), constants.NECK_COLOR)
-            # Use the already calculated head_pos to draw the head.
             pygame.draw.circle(self.screen, constants.HEAD_COLOR, head_pos.astype(int), constants.HEAD_RADIUS)
         
         # 4. Draw the current step counter
