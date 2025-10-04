@@ -90,24 +90,47 @@ class Renderer:
             body_forward_vector = np.array([math.cos(body_angle_rad), math.sin(body_angle_rad)])
             body_right_vector = np.array([-math.sin(body_angle_rad), math.cos(body_angle_rad)])
             
-            torso_color = constants.TORSO_COLOR_SEEK if agent.state == "seeking" else constants.TORSO_COLOR_WANDER
+            if agent.state == "seeking":
+                torso_color = constants.TORSO_COLOR_SEEK
+            elif agent.state == "resting":
+                torso_color = constants.TORSO_COLOR_REST
+            else: # Wandering
+                torso_color = constants.TORSO_COLOR_WANDER
 
-            # --- 3. Calculate Gait Displacements ---
-            speed_ratio = np.linalg.norm(agent.velocity) / agent.max_speed if agent.max_speed > 0 else 0
-            gait_cycle = math.sin(agent.gait_phase) * speed_ratio
+            # --- 3. Calculate Limb Positions based on State ---
+            if agent.state == "resting":
+                # --- Sitting Animation ---
+                # Feet are placed in front of the body
+                feet_forward_offset = body_forward_vector * (constants.TORSO_DEPTH + constants.FOOT_HEIGHT / 2)
+                right_foot_pos = agent.position + feet_forward_offset + (body_right_vector * constants.FOOT_WIDTH)
+                left_foot_pos = agent.position + feet_forward_offset - (body_right_vector * constants.FOOT_WIDTH)
+                
+                # Hands are placed to the sides, slightly back, as if bracing on the ground
+                hands_side_offset = body_right_vector * (constants.SHOULDER_WIDTH / 2 + constants.HAND_RADIUS)
+                hands_back_offset = -body_forward_vector * (constants.TORSO_DEPTH / 2)
+                right_hand_pos = agent.position + hands_side_offset + hands_back_offset
+                left_hand_pos = agent.position - hands_side_offset + hands_back_offset
+            else:
+                # --- Walking Animation (Gait Cycle) ---
+                # The speed_ratio must be calculated against the agent's absolute top speed (base_max_speed)
+                # to correctly reflect tiredness in the animation.
+                speed_ratio = np.linalg.norm(agent.velocity) / agent.base_max_speed if agent.base_max_speed > 0 else 0
+                gait_cycle = math.sin(agent.gait_phase) * speed_ratio
 
-            # Contralateral movement: right foot forward, left hand forward (and vice versa)
-            right_foot_forward_disp = body_forward_vector * gait_cycle * constants.GAIT_AMPLITUDE_FORWARD
-            left_foot_forward_disp = body_forward_vector * -gait_cycle * constants.GAIT_AMPLITUDE_FORWARD
-            right_hand_forward_disp = body_forward_vector * -gait_cycle * constants.GAIT_AMPLITUDE_FORWARD
-            left_hand_forward_disp = body_forward_vector * gait_cycle * constants.GAIT_AMPLITUDE_FORWARD
+                # Contralateral movement: right foot forward, left hand forward (and vice versa)
+                right_foot_forward_disp = body_forward_vector * gait_cycle * constants.GAIT_AMPLITUDE_FORWARD
+                left_foot_forward_disp = body_forward_vector * -gait_cycle * constants.GAIT_AMPLITUDE_FORWARD
+                right_hand_forward_disp = body_forward_vector * -gait_cycle * constants.GAIT_AMPLITUDE_FORWARD
+                left_hand_forward_disp = body_forward_vector * gait_cycle * constants.GAIT_AMPLITUDE_FORWARD
 
-            # --- 4. Calculate Final Limb Positions ---
-            # Start at center, move to side, then apply forward/back displacement
-            right_foot_pos = agent.position + (body_right_vector * constants.GAIT_AMPLITUDE_SIDEWAYS) + right_foot_forward_disp
-            left_foot_pos = agent.position - (body_right_vector * constants.GAIT_AMPLITUDE_SIDEWAYS) + left_foot_forward_disp
-            right_hand_pos = agent.position + (body_right_vector * (constants.SHOULDER_WIDTH / 2)) + right_hand_forward_disp
-            left_hand_pos = agent.position - (body_right_vector * (constants.SHOULDER_WIDTH / 2)) + left_hand_forward_disp
+                # Scale the sideways step distance by the agent's current speed for realism
+                sideways_gait_amplitude = constants.GAIT_AMPLITUDE_SIDEWAYS * speed_ratio
+
+                # Start at center, move to side, then apply forward/back displacement
+                right_foot_pos = agent.position + (body_right_vector * sideways_gait_amplitude) + right_foot_forward_disp
+                left_foot_pos = agent.position - (body_right_vector * sideways_gait_amplitude) + left_foot_forward_disp
+                right_hand_pos = agent.position + (body_right_vector * (constants.SHOULDER_WIDTH / 2)) + right_hand_forward_disp
+                left_hand_pos = agent.position - (body_right_vector * (constants.SHOULDER_WIDTH / 2)) + left_hand_forward_disp
 
             # --- 5. Draw Components in Correct Layers (Bottom to Top) ---
             # Feet

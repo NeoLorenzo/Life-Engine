@@ -31,7 +31,7 @@ class Simulation:
                 agent.perceive_and_act(self.environment, self.logger)
 
             # --- State Update Step ---
-            self.environment.update()
+            self.environment.update(self.logger)
 
             # --- Rendering Step ---
             self.renderer.draw(self.environment, step)

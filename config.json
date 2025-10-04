@@ -1,34 +1,36 @@
 {
-  "simulation": {
-    "seed": 42
-  },
-  "environment": {
-    "agents": [
-      {
-        "id": 0,
-        "initial_position": [400.0, 300.0],
-        "velocity": [0.0, 1.5],
-        "max_speed": 1.5,
-        "max_force": 0.05,
-        "head_turn_speed": 0.1,
-        "friction_strength": 0.99,
-        "vision_range": 200.0,
-        "field_of_view": 120.0,
-        "wander_distance": 80.0,
-        "wander_radius": 40.0,
-        "head_scan_angle": 75.0,
-        "head_scan_speed": 0.05
-      }
-    ],
-    "food": [
-      {
-        "id": 0,
-        "position": [750.0, 500.0]
-      }
-    ]
-  },
-  "logging": {
-    "level": "INFO",
-    "format": "%(asctime)s | STEP %(step)s | %(levelname)-8s | %(module)-15s | %(message)s"
-  }
+    "simulation": {
+        "seed": 42
+    },
+    "environment": {
+        "agent_quantity": 3,
+        "agent_properties": {
+            "collision_radius": 8.0,
+            "max_stamina": 100.0,
+            "stamina_consumption_rate": 0.05,
+            "stamina_regeneration_rate": 0.4,
+            "tired_threshold_percent": 0.4,
+            "rest_threshold_percent": 0.1,
+            "wake_threshold_percent": 0.95,
+            "max_speed": 1.5,
+            "max_force": 0.03,
+            "head_turn_speed": 0.1,
+            "friction_strength": 0.99,
+            "vision_range": 150,
+            "field_of_view": 120,
+            "wander_distance": 100,
+            "wander_radius": 50,
+            "head_scan_angle": 80,
+            "head_scan_speed": 0.05
+        },
+        "food": [
+            { "id": 0, "position": [400, 300] },
+            { "id": 1, "position": [700, 150] },
+            { "id": 2, "position": [200, 500] }
+        ]
+    },
+    "logging": {
+        "level": "INFO",
+        "format": "%(asctime)s [%(levelname)s] [Step:%(step)s] %(message)s"
+    }
 }

@@ -48,6 +48,5 @@ def main():
         renderer.close()
         logging.shutdown()
 
-
 if __name__ == "__main__":
     main()

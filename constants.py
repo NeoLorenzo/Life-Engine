@@ -13,6 +13,7 @@ BACKGROUND_COLOR = (255, 255, 255)  # White
 # Agent Torso visual properties (viewed from top)
 TORSO_COLOR_WANDER = (50, 50, 200)  # Blue
 TORSO_COLOR_SEEK = (50, 150, 255) # Alert Cyan
+TORSO_COLOR_REST = (150, 150, 150) # Grey
 SHOULDER_WIDTH = 14
 TORSO_DEPTH = 8 # How "thick" the torso is from front to back
 

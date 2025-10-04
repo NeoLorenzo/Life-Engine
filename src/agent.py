@@ -17,12 +17,14 @@ Data Contract:
 import numpy as np
 import logging
 import math
+import constants
 # We need to import the Environment class for type hinting, but this can
 # create a circular dependency. We use a string hint ('Environment') to avoid this.
 
 class Agent:
-    def __init__(self, id: int, position: list[float], velocity: list[float], max_speed: float, max_force: float, friction_strength: float, vision_range: float, field_of_view: float, wander_distance: float, wander_radius: float, head_scan_angle: float, head_scan_speed: float, head_turn_speed: float):
+    def __init__(self, id: int, position: list[float], velocity: list[float], collision_radius: float, max_stamina: float, stamina_consumption_rate: float, stamina_regeneration_rate: float, tired_threshold_percent: float, rest_threshold_percent: float, wake_threshold_percent: float, max_speed: float, max_force: float, friction_strength: float, vision_range: float, field_of_view: float, wander_distance: float, wander_radius: float, head_scan_angle: float, head_scan_speed: float, head_turn_speed: float):
         self.id = id
+        self.radius = collision_radius
         self.position = np.array(position, dtype=np.float64)
         self.velocity = np.array(velocity, dtype=np.float64)
         self.acceleration = np.zeros(2, dtype=np.float64)
@@ -31,6 +33,7 @@ class Agent:
         initial_heading = self.velocity / np.linalg.norm(self.velocity) if np.linalg.norm(self.velocity) > 0 else np.array([1.0, 0.0])
         self.heading_vector = initial_heading
         
+        self.base_max_speed = max_speed # The agent's top speed when fully rested
         self.max_speed = max_speed
         self.max_force = max_force
         self.head_turn_speed = head_turn_speed
@@ -40,13 +43,22 @@ class Agent:
         self.wander_radius = wander_radius
         self.wander_target = None
         
+        # Stamina attributes
+        self.max_stamina = max_stamina
+        self.stamina = max_stamina
+        self.stamina_consumption_rate = stamina_consumption_rate
+        self.stamina_regeneration_rate = stamina_regeneration_rate
+        self.tired_threshold = max_stamina * tired_threshold_percent
+        self.rest_threshold = max_stamina * rest_threshold_percent
+        self.wake_threshold = max_stamina * wake_threshold_percent
+        
         self.head_scan_angle_rad = math.radians(head_scan_angle)
         self.head_scan_speed = head_scan_speed
-        self.scan_phase = np.random.uniform(0, 2 * math.pi)
+        self.scan_phase = 0.0 # Start with head facing forward
         
-        self.state = "wandering" # Add state attribute
-        self.gait_phase = 0.0     # Add gait phase attribute
-        self.gait_speed = 0.2     # Controls how fast limbs swing relative to speed
+        self.state = "wandering"
+        self.gait_phase = 0.0
+        self.gait_speed = 0.2
         
         self.field_of_view_rad = math.radians(field_of_view)
         self.cos_fov_half = math.cos(self.field_of_view_rad / 2.0)
@@ -76,6 +88,20 @@ class Agent:
 
     def perceive_and_act(self, environment: 'Environment', logger: logging.LoggerAdapter):
         """Perceives the environment and calculates forces to apply."""
+        # --- State Transition Logic ---
+        if self.state == "resting":
+            if self.stamina > self.wake_threshold:
+                self.state = "wandering"
+                logger.info(f"Agent {self.id} has recovered. Resuming wandering.")
+            else:
+                return # Do nothing while resting
+
+        if self.stamina < self.rest_threshold:
+            self.state = "resting"
+            logger.info(f"Agent {self.id} is exhausted. Entering resting state.")
+            return # Stop acting for this frame
+
+        # --- Perception Logic (runs only if not resting) ---
         visible_food = []
         for food in environment.food:
             vec_to_food = food.position - self.position
@@ -87,38 +113,31 @@ class Agent:
                 if cos_angle < self.cos_fov_half: continue
             visible_food.append((dist_sq, food))
 
+        # --- Action Logic (runs only if not resting) ---
         target_heading = self.heading_vector
         if not visible_food:
             self.state = "wandering"
-            # --- Wandering Behavior (Corrected Rhythmic Logic) ---
-
-            # 1. Body Logic: Move towards the long-term wander target
             if self.wander_target is None or np.linalg.norm(self.position - self.wander_target) < self.wander_radius:
-                # This logic now correctly uses the head's direction to pick a new target
                 circle_center = self.position + self.heading_vector * self.wander_distance
                 angle = np.random.uniform(0, 2 * math.pi)
                 displacement = np.array([math.cos(angle), math.sin(angle)]) * self.wander_radius
-                self.wander_target = circle_center + displacement
+                new_target = circle_center + displacement
+                new_target[0] = np.clip(new_target[0], 0, constants.SCREEN_WIDTH)
+                new_target[1] = np.clip(new_target[1], 0, constants.SCREEN_HEIGHT)
+                self.wander_target = new_target
                 logger.debug(f"Agent {self.id} generating new wander target at ({self.wander_target[0]:.1f}, {self.wander_target[1]:.1f})")
             
             seek_force = self._seek(self.wander_target)
             self._apply_force(seek_force)
 
-            # 2. Head Logic: Perform a smooth, rhythmic scan
             self.scan_phase += self.head_scan_speed
             scan_offset_angle = math.sin(self.scan_phase) * self.head_scan_angle_rad / 2.0
-            
-            # The head scans relative to the body's general direction of movement
             body_direction = self.velocity / np.linalg.norm(self.velocity) if np.linalg.norm(self.velocity) > 0.1 else self.heading_vector
-            
-            # Rotate the body_direction vector by the scan_offset_angle
             c, s = math.cos(scan_offset_angle), math.sin(scan_offset_angle)
             rotation_matrix = np.array([[c, -s], [s, c]])
             target_heading = rotation_matrix @ body_direction
-
         else:
             self.state = "seeking"
-            # --- Seeking Behavior (Unchanged) ---
             self.wander_target = None 
             visible_food.sort(key=lambda x: x[0])
             _, closest_food = visible_food[0]
@@ -128,7 +147,6 @@ class Agent:
             seek_force = self._seek(closest_food.position)
             self._apply_force(seek_force)
 
-        # --- Update Head Direction (Unchanged) ---
         norm = np.linalg.norm(target_heading)
         if norm > 0:
             target_heading /= norm
@@ -137,24 +155,32 @@ class Agent:
 
     def update(self):
         """Updates the agent's state based on physics."""
+        if self.state == "resting":
+            self.stamina = min(self.max_stamina, self.stamina + self.stamina_regeneration_rate)
+            self.velocity *= 0 # Come to a full stop
+            self.acceleration = np.zeros(2, dtype=np.float64)
+            return
 
-        # Update gait phase based on current speed
+        # --- Stamina Consumption and Speed Reduction ---
         current_speed = np.linalg.norm(self.velocity)
-        self.gait_phase += current_speed * self.gait_speed
+        stamina_consumed = current_speed * self.stamina_consumption_rate
+        self.stamina = max(0, self.stamina - stamina_consumed)
 
-        # Apply friction
+        if self.stamina < self.tired_threshold:
+            # Reduce max speed proportionally to remaining stamina below the threshold
+            speed_multiplier = self.stamina / self.tired_threshold
+            self.max_speed = self.base_max_speed * max(0.1, speed_multiplier) # Ensure a small minimum speed
+        else:
+            self.max_speed = self.base_max_speed # Restore full speed
+
+        # --- Standard Physics Update ---
+        self.gait_phase += current_speed * self.gait_speed
         self.velocity *= self.friction_strength
-        
-        # Update velocity with acceleration
         self.velocity += self.acceleration
         
-        # Limit velocity to max_speed
         norm = np.linalg.norm(self.velocity)
         if norm > self.max_speed:
             self.velocity = (self.velocity / norm) * self.max_speed
             
-        # Update position
         self.position += self.velocity
-        
-        # Reset acceleration for the next frame
         self.acceleration = np.zeros(2, dtype=np.float64)
