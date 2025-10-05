@@ -3,7 +3,7 @@
         "seed": 42
     },
     "environment": {
-        "agent_quantity": 3,
+        "agent_quantity": 30,
         "agent_properties": {
             "collision_radius": 8.0,
             "max_stamina": 100.0,
@@ -12,8 +12,10 @@
             "tired_threshold_percent": 0.4,
             "rest_threshold_percent": 0.1,
             "wake_threshold_percent": 0.95,
+            "context_map_resolution": 32,
+            "threat_detection_range": 60.0,
             "max_speed": 1.5,
-            "max_force": 0.03,
+            "max_force": 0.05,
             "head_turn_speed": 0.1,
             "friction_strength": 0.99,
             "vision_range": 150,
@@ -23,12 +25,15 @@
             "head_scan_angle": 80,
             "head_scan_speed": 0.05
         },
-        "food": [
-            { "id": 0, "position": [400, 300] },
-            { "id": 1, "position": [700, 150] },
-            { "id": 2, "position": [200, 500] }
-        ]
-    },
+            "obstacles": {
+                "quantity": 5,
+                "min_radius": 20.0,
+                "max_radius": 50.0
+            },
+            "food": {
+                "quantity": 0
+            }
+        },
     "logging": {
         "level": "INFO",
         "format": "%(asctime)s [%(levelname)s] [Step:%(step)s] %(message)s"

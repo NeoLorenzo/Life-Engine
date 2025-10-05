@@ -50,7 +50,16 @@ class Renderer:
         # 1. Fill the background
         self.screen.fill(constants.BACKGROUND_COLOR)
 
-        # 2. Draw all food items
+        # 2. Draw all obstacles
+        for obstacle in environment.obstacles:
+            pygame.draw.circle(
+                self.screen,
+                constants.OBSTACLE_COLOR,
+                obstacle.position.astype(int),
+                int(obstacle.radius)
+            )
+
+        # 3. Draw all food items
         for food in environment.food:
             pygame.draw.circle(
                 self.screen,

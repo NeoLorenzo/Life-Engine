@@ -39,6 +39,9 @@ GAIT_AMPLITUDE_SIDEWAYS = 6 # How far feet step out to the side
 FOOD_COLOR = (0, 255, 0)  # Green
 FOOD_RADIUS = 3
 
+# Obstacle visual properties
+OBSTACLE_COLOR = (100, 100, 100) # Dark Grey
+
 # Agent Sensory Visualization
 # RGBA format for transparency (A=alpha)
 VISION_CONE_COLOR = (200, 200, 255, 100)

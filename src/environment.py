@@ -14,6 +14,13 @@ class Food:
         self.id = id
         self.position = np.array(position, dtype=np.float64)
 
+class Obstacle:
+    """A simple class for static obstacles."""
+    def __init__(self, id: int, position: list[float], radius: float):
+        self.id = id
+        self.position = np.array(position, dtype=np.float64)
+        self.radius = radius
+
 class Environment:
     def __init__(self, config: dict):
         self.agents = []
@@ -36,13 +43,37 @@ class Environment:
             )
             self.agents.append(agent)
 
-        self.food = [
-            Food(
-                id=conf["id"],
-                position=conf["position"]
+        # Procedural Obstacle Generation
+        self.obstacles = []
+        obstacle_config = config.get("obstacles", {})
+        for i in range(obstacle_config.get("quantity", 0)):
+            self.obstacles.append(
+                Obstacle(
+                    id=i,
+                    position=[
+                        np.random.uniform(0, constants.SCREEN_WIDTH),
+                        np.random.uniform(0, constants.SCREEN_HEIGHT)
+                    ],
+                    radius=np.random.uniform(
+                        obstacle_config.get("min_radius", 10),
+                        obstacle_config.get("max_radius", 30)
+                    )
+                )
             )
-            for conf in config.get("food", [])
-        ]
+
+        # Procedural Food Generation
+        self.food = []
+        food_config = config.get("food", {})
+        for i in range(food_config.get("quantity", 0)):
+            self.food.append(
+                Food(
+                    id=i,
+                    position=[
+                        np.random.uniform(0, constants.SCREEN_WIDTH),
+                        np.random.uniform(0, constants.SCREEN_HEIGHT)
+                    ]
+                )
+            )
 
     def _resolve_collisions(self, logger: logging.LoggerAdapter):
         """Handles agent-agent and agent-boundary collisions."""
@@ -56,7 +87,7 @@ class Environment:
                 dist_sq = np.dot(delta, delta)
                 min_dist = agent1.radius + agent2.radius
                 
-                if dist_sq < min_dist ** 2:
+                if dist_sq < min_dist ** 2 and dist_sq > 1e-6:
                     logger.debug(f"Collision detected and resolved between Agent {agent1.id} and Agent {agent2.id}")
                     dist = np.sqrt(dist_sq)
                     normal = delta / dist
@@ -71,6 +102,27 @@ class Environment:
                     v2n = np.dot(agent2.velocity, normal)
                     agent1.velocity += normal * (v2n - v1n)
                     agent2.velocity += normal * (v1n - v2n)
+
+        # Agent-Obstacle collision (NEW)
+        for agent in self.agents:
+            for obstacle in self.obstacles:
+                delta = agent.position - obstacle.position
+                dist_sq = np.dot(delta, delta)
+                min_dist = agent.radius + obstacle.radius
+
+                if dist_sq < min_dist ** 2:
+                    logger.debug(f"Agent {agent.id} collided with obstacle {obstacle.id}.")
+                    dist = np.sqrt(dist_sq) if dist_sq > 1e-6 else 1.0
+                    normal = delta / dist if dist > 1e-6 else np.array([1.0, 0.0])
+                    overlap = min_dist - dist
+
+                    # Push the agent out of the obstacle
+                    agent.position += normal * overlap
+
+                    # Reflect the agent's velocity
+                    v_dot_n = np.dot(agent.velocity, normal)
+                    agent.velocity -= 2 * v_dot_n * normal
+                    agent.velocity *= 0.8 # Damping to lose energy on bounce
 
         # Agent-Boundary collision
         for agent in self.agents:
