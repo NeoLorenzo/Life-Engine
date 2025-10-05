@@ -59,13 +59,22 @@ class Renderer:
                 int(obstacle.radius)
             )
 
-        # 3. Draw all food items
-        for food in environment.food:
+        # 3. Draw all apple tree TRUNKS (as they are obstacles)
+        for tree in environment.trees:
             pygame.draw.circle(
                 self.screen,
-                constants.FOOD_COLOR,
-                food.position.astype(int),
-                constants.FOOD_RADIUS
+                constants.APPLE_TREE_TRUNK_COLOR,
+                tree.position.astype(int),
+                int(tree.trunk_radius)
+            )
+
+        # 4. Draw all apple items
+        for apple in environment.apples:
+            pygame.draw.circle(
+                self.screen,
+                constants.APPLE_COLOR,
+                apple.position.astype(int),
+                constants.APPLE_RADIUS
             )
 
         # 3. Draw all agents and their vision cones
@@ -73,15 +82,30 @@ class Renderer:
             # --- 1. Calculate Head Position ---
             # We need the head's position for both the cone and the head itself.
             head_pos = agent.position + agent.heading_vector * (constants.TORSO_DEPTH)
-
-            # --- 2. Draw Vision Cone from the Head ---
-            center_point = head_pos # Use the head's position as the origin.
+            center_point = head_pos
             forward_angle = math.atan2(agent.forward_vector[1], agent.forward_vector[0])
+
+            # --- 2. Draw Large Vision Cone (for trees) ---
+            large_start_angle = forward_angle - agent.large_field_of_view_rad / 2
+            large_end_angle = forward_angle + agent.large_field_of_view_rad / 2
+            
+            large_points = [center_point]
+            num_segments = 20
+            for i in range(num_segments + 1):
+                angle = large_start_angle + (large_end_angle - large_start_angle) * i / num_segments
+                x = center_point[0] + agent.large_vision_range * math.cos(angle)
+                y = center_point[1] + agent.large_vision_range * math.sin(angle)
+                large_points.append((x, y))
+            
+            large_cone_surface = pygame.Surface((constants.SCREEN_WIDTH, constants.SCREEN_HEIGHT), pygame.SRCALPHA)
+            pygame.draw.polygon(large_cone_surface, constants.LARGE_VISION_CONE_COLOR, large_points)
+            self.screen.blit(large_cone_surface, (0, 0))
+
+            # --- 3. Draw Standard Vision Cone (for apples) ---
             start_angle = forward_angle - agent.field_of_view_rad / 2
             end_angle = forward_angle + agent.field_of_view_rad / 2
             
             points = [center_point]
-            num_segments = 20
             for i in range(num_segments + 1):
                 angle = start_angle + (end_angle - start_angle) * i / num_segments
                 x = center_point[0] + agent.vision_range * math.cos(angle)
@@ -92,7 +116,7 @@ class Renderer:
             pygame.draw.polygon(cone_surface, constants.VISION_CONE_COLOR, points)
             self.screen.blit(cone_surface, (0, 0))
 
-            # --- 2. Define Orientations and Vectors ---
+            # --- 4. Define Orientations and Vectors ---
             body_angle_rad = math.atan2(agent.velocity[1], agent.velocity[0]) if np.linalg.norm(agent.velocity) > 0.1 else math.atan2(agent.heading_vector[1], agent.heading_vector[0])
             body_angle_deg = math.degrees(body_angle_rad)
             
@@ -127,60 +151,107 @@ class Renderer:
             right_hand_pos_sit = agent.position + hands_side_sit + hands_back_sit
             left_hand_pos_sit = agent.position - hands_side_sit + hands_back_sit
 
-            # --- 4. Determine Final Limb Positions based on State ---
-            if agent.state in ["wandering", "seeking"]:
+            # --- 4. Define Additional Poses ---
+            # --- Bending Over Pose (for picking up) ---
+            hands_fwd_bend = body_forward_vector * (constants.TORSO_DEPTH + constants.HAND_RADIUS)
+            right_hand_pos_bend = agent.position + hands_fwd_bend + (body_right_vector * (constants.SHOULDER_WIDTH / 4))
+            left_hand_pos_bend = agent.position + hands_fwd_bend - (body_right_vector * (constants.SHOULDER_WIDTH / 4))
+            
+            # --- Eating Pose ---
+            right_hand_pos_eat = head_pos - (body_right_vector * constants.HAND_RADIUS)
+            left_hand_pos_eat = agent.position - (body_right_vector * (constants.SHOULDER_WIDTH / 2)) # Neutral
+
+            # --- 5. Determine Final Limb Positions based on State ---
+            if agent.state in ["wandering", "seeking", "seeking_tree", "searching_for_apple", "moving_to_apple"]:
                 right_foot_pos, left_foot_pos = right_foot_pos_walk, left_foot_pos_walk
                 right_hand_pos, left_hand_pos = right_hand_pos_walk, left_hand_pos_walk
             elif agent.state == "resting":
                 right_foot_pos, left_foot_pos = right_foot_pos_sit, left_foot_pos_sit
                 right_hand_pos, left_hand_pos = right_hand_pos_sit, left_hand_pos_sit
-            else: # Animating
-                progress = (constants.SIT_STAND_ANIMATION_DURATION - agent.animation_timer) / constants.SIT_STAND_ANIMATION_DURATION
-                
+            elif agent.state == "eating":
+                right_foot_pos, left_foot_pos = right_foot_pos_walk, left_foot_pos_walk # Use walking pose with 0 speed
+                right_hand_pos, left_hand_pos = right_hand_pos_eat, left_hand_pos_eat
+            elif agent.state == "dead":
+                torso_color = constants.DEAD_AGENT_COLOR # Override color
+                # Sprawl the limbs
+                right_foot_pos = agent.position + np.array([10, 5])
+                left_foot_pos = agent.position + np.array([-8, -12])
+                right_hand_pos = agent.position + np.array([12, -8])
+                left_hand_pos = agent.position + np.array([-10, 10])
+            else: # Animating (sit/stand/pickup)
                 if agent.state == "sitting_down":
+                    progress = (constants.SIT_STAND_ANIMATION_DURATION - agent.animation_timer) / constants.SIT_STAND_ANIMATION_DURATION
                     start_foot_r, end_foot_r = right_foot_pos_walk, right_foot_pos_sit
                     start_foot_l, end_foot_l = left_foot_pos_walk, left_foot_pos_sit
                     start_hand_r, end_hand_r = right_hand_pos_walk, right_hand_pos_sit
                     start_hand_l, end_hand_l = left_hand_pos_walk, left_hand_pos_sit
-                else: # standing_up
+                elif agent.state == "standing_up":
+                    progress = (constants.SIT_STAND_ANIMATION_DURATION - agent.animation_timer) / constants.SIT_STAND_ANIMATION_DURATION
                     start_foot_r, end_foot_r = right_foot_pos_sit, right_foot_pos_walk
                     start_foot_l, end_foot_l = left_foot_pos_sit, left_foot_pos_walk
                     start_hand_r, end_hand_r = right_hand_pos_sit, right_hand_pos_walk
                     start_hand_l, end_hand_l = left_hand_pos_sit, left_hand_pos_walk
-                
+                elif agent.state == "picking_up":
+                    progress = (constants.PICKUP_ANIMATION_DURATION - agent.animation_timer) / constants.PICKUP_ANIMATION_DURATION
+                    # Animate from still walking pose to bent pose
+                    start_foot_r, end_foot_r = right_foot_pos_walk, right_foot_pos_walk
+                    start_foot_l, end_foot_l = left_foot_pos_walk, left_foot_pos_walk
+                    start_hand_r, end_hand_r = right_hand_pos_walk, right_hand_pos_bend
+                    start_hand_l, end_hand_l = left_hand_pos_walk, left_hand_pos_bend
+
                 # Linear Interpolation (lerp)
                 right_foot_pos = start_foot_r + (end_foot_r - start_foot_r) * progress
                 left_foot_pos = start_foot_l + (end_foot_l - start_foot_l) * progress
                 right_hand_pos = start_hand_r + (end_hand_r - start_hand_r) * progress
                 left_hand_pos = start_hand_l + (end_hand_l - start_hand_l) * progress
 
-            # --- 5. Draw Components in Correct Layers (Bottom to Top) ---
+            # --- 6. Draw Components in Correct Layers (Bottom to Top) ---
             # Feet
             self._draw_rotated_rect(self.screen, (constants.FOOT_WIDTH, constants.FOOT_HEIGHT), left_foot_pos, -body_angle_deg - 90, constants.FOOT_COLOR)
             self._draw_rotated_rect(self.screen, (constants.FOOT_WIDTH, constants.FOOT_HEIGHT), right_foot_pos, -body_angle_deg - 90, constants.FOOT_COLOR)
             
             # Hands
-            pygame.draw.circle(self.screen, constants.HAND_COLOR, left_hand_pos.astype(int), constants.HAND_RADIUS)
-            pygame.draw.circle(self.screen, constants.HAND_COLOR, right_hand_pos.astype(int), constants.HAND_RADIUS)
+            hand_color = constants.DEAD_AGENT_COLOR if agent.state == "dead" else constants.HAND_COLOR
+            pygame.draw.circle(self.screen, hand_color, left_hand_pos.astype(int), constants.HAND_RADIUS)
+            pygame.draw.circle(self.screen, hand_color, right_hand_pos.astype(int), constants.HAND_RADIUS)
 
             # Torso (shoulders) - Drawn AFTER limbs so it appears on top
             self._draw_rotated_rect(self.screen, (constants.SHOULDER_WIDTH, constants.TORSO_DEPTH), agent.position, -body_angle_deg - 90, torso_color)
             
             # Neck and Head
-            # Reduce the offset to bring the head closer to the body's center.
+            head_color = constants.DEAD_AGENT_COLOR if agent.state == "dead" else constants.HEAD_COLOR
+            neck_color = constants.DEAD_AGENT_COLOR if agent.state == "dead" else constants.NECK_COLOR
             head_pos = agent.position + agent.heading_vector * (constants.TORSO_DEPTH * 0.6)
             neck_pos = agent.position + agent.heading_vector * (constants.TORSO_DEPTH * 0.3)
-            self._draw_rotated_rect(self.screen, (constants.NECK_WIDTH, constants.NECK_HEIGHT), neck_pos, math.degrees(math.atan2(agent.heading_vector[1], agent.heading_vector[0])), constants.NECK_COLOR)
-            pygame.draw.circle(self.screen, constants.HEAD_COLOR, head_pos.astype(int), constants.HEAD_RADIUS)
+            self._draw_rotated_rect(self.screen, (constants.NECK_WIDTH, constants.NECK_HEIGHT), neck_pos, math.degrees(math.atan2(agent.heading_vector[1], agent.heading_vector[0])), neck_color)
+            pygame.draw.circle(self.screen, head_color, head_pos.astype(int), constants.HEAD_RADIUS)
         
         # 4. Draw the current step counter
         step_text = self.font.render(f"Step: {step}", True, (0, 0, 0))
         self.screen.blit(step_text, (10, 10))
 
-        # 5. Update the display
+        # 5. Draw Tree Canopies (on top of everything else)
+        for tree in environment.trees:
+            # Create a semi-transparent surface for the canopy
+            canopy_surface = pygame.Surface((tree.canopy_radius * 2, tree.canopy_radius * 2), pygame.SRCALPHA)
+            pygame.draw.circle(
+                canopy_surface,
+                (*constants.APPLE_TREE_CANOPY_COLOR, 180), # Add alpha for transparency
+                (tree.canopy_radius, tree.canopy_radius),
+                tree.canopy_radius
+            )
+            # Blit the transparent surface onto the main screen
+            top_left_pos = tree.position - tree.canopy_radius
+            self.screen.blit(canopy_surface, top_left_pos)
+
+        # 6. Draw the current step counter
+        step_text = self.font.render(f"Step: {step}", True, (0, 0, 0))
+        self.screen.blit(step_text, (10, 10))
+
+        # 7. Update the display
         pygame.display.flip()
         
-        # 6. Tick the clock to control update speed
+        # 8. Tick the clock to control update speed
         self.clock.tick(30) # Increase frame rate slightly
 
     def handle_events(self) -> bool:

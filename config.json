@@ -3,7 +3,7 @@
         "seed": 42
     },
     "environment": {
-        "agent_quantity": 30,
+        "agent_quantity": 1,
         "agent_properties": {
             "collision_radius": 8.0,
             "max_stamina": 100.0,
@@ -23,20 +23,35 @@
             "friction_strength": 0.99,
             "vision_range": 150,
             "field_of_view": 120,
+            "large_vision_range": 300,
+            "large_field_of_view": 160,
             "wander_distance": 100,
             "wander_radius": 50,
             "head_scan_angle": 80,
-            "head_scan_speed": 0.05
+            "head_scan_speed": 0.05,
+            "initial_hunger": 2000.0,
+            "max_hunger": 2500.0,
+            "hunger_decay_rate": 0.1,
+            "hunger_per_apple": 500.0,
+            "hungry_threshold_percent": 0.6
         },
-            "obstacles": {
-                "quantity": 5,
-                "min_radius": 20.0,
-                "max_radius": 50.0
-            },
-            "food": {
-                "quantity": 0
-            }
+        "obstacles": {
+            "quantity": 5,
+            "min_radius": 20.0,
+            "max_radius": 50.0
         },
+        "apple_trees": {
+            "quantity": 10,
+            "min_radius": 15.0,
+            "max_radius": 30.0,
+            "spawn_radius_multiplier": 1.5,
+            "max_apples": 5,
+            "apple_spawn_rate": 0.005
+        },
+        "initial_apples": {
+            "quantity": 0
+        }
+    },
     "logging": {
         "level": "INFO",
         "format": "%(asctime)s [%(levelname)s] [Step:%(step)s] %(message)s"
