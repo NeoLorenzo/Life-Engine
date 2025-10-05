@@ -10,10 +10,14 @@ SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600
 BACKGROUND_COLOR = (255, 255, 255)  # White
 
-# Agent Torso visual properties (viewed from top)
-TORSO_COLOR_WANDER = (50, 50, 200)  # Blue
-TORSO_COLOR_SEEK = (50, 150, 255) # Alert Cyan
-TORSO_COLOR_REST = (150, 150, 150) # Grey
+# Agent visual properties
+AGENT_COLORS = [
+    (200, 50, 50),   # Red
+    (50, 200, 50),   # Green
+    (50, 50, 200),   # Blue
+    (200, 200, 50),  # Yellow
+    (200, 50, 200),  # Magenta
+]
 SHOULDER_WIDTH = 14
 TORSO_DEPTH = 8 # How "thick" the torso is from front to back
 
@@ -34,6 +38,9 @@ FOOT_HEIGHT = 6
 # Gait cycle parameters
 GAIT_AMPLITUDE_FORWARD = 8 # How far feet/hands move forward/back
 GAIT_AMPLITUDE_SIDEWAYS = 6 # How far feet step out to the side
+
+# Animation parameters
+SIT_STAND_ANIMATION_DURATION = 15 # Duration in steps (frames) for the animation
 
 # Food visual properties
 FOOD_COLOR = (0, 255, 0)  # Green

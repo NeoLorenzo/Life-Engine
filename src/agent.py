@@ -18,15 +18,19 @@ import numpy as np
 import logging
 import math
 import constants
+import random
 # We need to import the Environment class for type hinting, but this can
 # create a circular dependency. We use a string hint ('Environment') to avoid this.
 
 class Agent:
-    def __init__(self, id: int, position: list[float], velocity: list[float], collision_radius: float, max_stamina: float, stamina_consumption_rate: float, stamina_regeneration_rate: float, tired_threshold_percent: float, rest_threshold_percent: float, wake_threshold_percent: float, context_map_resolution: int, threat_detection_range: float, max_speed: float, max_force: float, friction_strength: float, vision_range: float, field_of_view: float, wander_distance: float, wander_radius: float, head_scan_angle: float, head_scan_speed: float, head_turn_speed: float):
+    def __init__(self, id: int, position: list[float], velocity: list[float], collision_radius: float, max_stamina: float, stamina_consumption_rate: float, stamina_regeneration_rate: float, tired_threshold_percent: float, rest_threshold_percent: float, wake_threshold_percent: float, context_map_resolution: int, threat_detection_range: float, danger_avoidance_strength: float, flocking_range: float, flocking_strength: float, max_speed: float, max_force: float, friction_strength: float, vision_range: float, field_of_view: float, wander_distance: float, wander_radius: float, head_scan_angle: float, head_scan_speed: float, head_turn_speed: float):
         self.id = id
         self.radius = collision_radius
         self.position = np.array(position, dtype=np.float64)
         self.velocity = np.array(velocity, dtype=np.float64)
+        self.color = random.choice(constants.AGENT_COLORS)
+        self.flocking_range = flocking_range
+        self.flocking_strength = flocking_strength
         self.acceleration = np.zeros(2, dtype=np.float64)
         
         initial_heading = self.velocity / np.linalg.norm(self.velocity) if np.linalg.norm(self.velocity) > 0 else np.array([1.0, 0.0])
@@ -55,6 +59,7 @@ class Agent:
         self.scan_phase = 0.0
         
         self.state = "wandering"
+        self.animation_timer = 0
         self.gait_phase = 0.0
         self.gait_speed = 0.2
         
@@ -64,6 +69,7 @@ class Agent:
         # --- Context Steering Architecture ---
         self.map_resolution = context_map_resolution
         self.threat_range = threat_detection_range
+        self.danger_avoidance_strength = danger_avoidance_strength
         self.interest_map = np.zeros(self.map_resolution)
         self.danger_map = np.zeros(self.map_resolution)
         # Pre-calculate direction vectors for each slot in the map
@@ -107,6 +113,24 @@ class Agent:
                 dot_products = np.dot(self.direction_vectors, vec_to_obstacle / dist)
                 self.danger_map += np.maximum(0, dot_products) * (danger_value ** 2)
         
+        # Other Agents
+        for other_agent in environment.agents:
+            if other_agent.id == self.id:
+                continue
+            
+            vec_to_agent = other_agent.position - self.position
+            dist_sq = np.dot(vec_to_agent, vec_to_agent)
+            
+            # Only consider agents within the threat detection range
+            if dist_sq < self.threat_range**2 and dist_sq > 1e-6:
+                dist = np.sqrt(dist_sq)
+                # Danger is inversely proportional to distance, cubed for sharper falloff
+                danger_value = 1.0 - (dist / self.threat_range)
+                
+                # Project this danger onto the map
+                dot_products = np.dot(self.direction_vectors, vec_to_agent / dist)
+                self.danger_map += np.maximum(0, dot_products) * (danger_value ** 3)
+
         # Boundaries
         boundary_points = [
             (self.position[0], 0), (self.position[0], constants.SCREEN_HEIGHT),
@@ -121,6 +145,24 @@ class Agent:
                 self.danger_map += np.maximum(0, dot_products) * (danger_value ** 2)
 
         # --- Evaluate INTEREST ---
+        # Flocking (Cohesion)
+        nearby_peers = []
+        center_of_mass = np.zeros(2, dtype=np.float64)
+        for peer in environment.agents:
+            if peer.id == self.id or peer.color != self.color:
+                continue
+            dist_sq = np.dot(peer.position - self.position, peer.position - self.position)
+            if dist_sq < self.flocking_range**2:
+                nearby_peers.append(peer.position)
+        
+        if nearby_peers:
+            center_of_mass = np.mean(nearby_peers, axis=0)
+            vec_to_com = center_of_mass - self.position
+            norm = np.linalg.norm(vec_to_com)
+            if norm > 0:
+                dot_products = np.dot(self.direction_vectors, vec_to_com / norm)
+                self.interest_map += np.maximum(0, dot_products) * self.flocking_strength
+
         # Visible Food (Highest Interest)
         visible_food = []
         for food in environment.food:
@@ -153,26 +195,32 @@ class Agent:
 
     def perceive_and_act(self, environment: 'Environment', logger: logging.LoggerAdapter):
         """Uses Context Steering to decide on an action."""
-        if self.state == "resting":
-            if self.stamina > self.wake_threshold:
-                self.state = "wandering"
-                logger.info(f"Agent {self.id} has recovered. Resuming wandering.")
+        # Handle state transitions that are based on internal timers or thresholds
+        if self.state == "resting" and self.stamina > self.wake_threshold:
+            self.state = "standing_up"
+            self.animation_timer = constants.SIT_STAND_ANIMATION_DURATION
+            logger.info(f"Agent {self.id} has recovered. Standing up.")
             return
 
-        if self.stamina < self.rest_threshold:
-            self.state = "resting"
-            logger.info(f"Agent {self.id} is exhausted. Entering resting state.")
+        if self.state in ["wandering", "seeking"] and self.stamina < self.rest_threshold:
+            self.state = "sitting_down"
+            self.animation_timer = constants.SIT_STAND_ANIMATION_DURATION
+            logger.info(f"Agent {self.id} is exhausted. Beginning to sit down.")
+            return
+        
+        # If animating, do not perceive or act
+        if self.state in ["sitting_down", "standing_up", "resting"]:
             return
 
         # 1. Evaluate the context to build interest and danger maps
         self._evaluate_context(environment)
 
-        # 2. Arbitrate: Subtract danger from interest
+        # 2. Arbitrate: Subtract danger from interest, scaled by the avoidance strength
         # We also slightly favor directions aligned with current velocity to encourage smooth movement
         current_vel_norm = self.velocity / np.linalg.norm(self.velocity) if np.linalg.norm(self.velocity) > 0 else self.heading_vector
         momentum_bonus = np.maximum(0, np.dot(self.direction_vectors, current_vel_norm)) * 0.1
         
-        final_map = self.interest_map - self.danger_map + momentum_bonus
+        final_map = self.interest_map - (self.danger_map * self.danger_avoidance_strength) + momentum_bonus
 
         # 3. Find the best direction
         best_direction_index = np.argmax(final_map)
@@ -198,8 +246,19 @@ class Agent:
         """Updates the agent's state based on physics."""
         if self.state == "resting":
             self.stamina = min(self.max_stamina, self.stamina + self.stamina_regeneration_rate)
-            self.velocity *= 0 # Come to a full stop
-            self.acceleration = np.zeros(2, dtype=np.float64)
+            self.velocity *= 0
+            self.acceleration.fill(0)
+            return
+
+        if self.state in ["sitting_down", "standing_up"]:
+            self.velocity *= 0.8 # Slow to a stop while animating
+            self.acceleration.fill(0)
+            self.animation_timer -= 1
+            if self.animation_timer <= 0:
+                if self.state == "sitting_down":
+                    self.state = "resting"
+                else: # standing_up
+                    self.state = "wandering"
             return
 
         # --- Stamina Consumption and Speed Reduction ---
