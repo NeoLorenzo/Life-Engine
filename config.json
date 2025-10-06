@@ -3,7 +3,11 @@
         "seed": 42
     },
     "environment": {
-        "agent_quantity": 1,
+        "day_night_cycle": {
+            "cycle_duration_steps": 1200,
+            "day_duration_percent": 0.5
+        },
+        "agent_quantity": 3,
         "agent_properties": {
             "collision_radius": 8.0,
             "max_stamina": 100.0,
@@ -33,7 +37,18 @@
             "max_hunger": 2500.0,
             "hunger_decay_rate": 0.1,
             "hunger_per_apple": 500.0,
-            "hungry_threshold_percent": 0.6
+            "hungry_threshold_percent": 0.6,
+            "vigilance_system": {
+                "initial_vigilance": 100.0,
+                "max_vigilance": 100.0,
+                "decay_rate_day": 0.075,
+                "decay_rate_night": 0.15,
+                "regeneration_rate": 0.3,
+                "sleep_threshold_percent": 0.1,
+                "wake_threshold_percent": 0.95,
+                "stamina_vigilance_floor_percent": 0.2,
+                "vision_clarity_in_darkness_percent": 0.1
+            }
         },
         "obstacles": {
             "quantity": 5,
@@ -53,7 +68,7 @@
         }
     },
     "logging": {
-        "level": "INFO",
+        "level": "DEBUG",
         "format": "%(asctime)s [%(levelname)s] [Step:%(step)s] %(message)s"
     }
 }

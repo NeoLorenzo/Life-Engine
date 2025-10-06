@@ -31,18 +31,10 @@ class Simulation:
                 agent.perceive_and_act(self.environment, self.logger)
 
             # --- State Update Step ---
-            self.environment.update(self.logger)
+            self.environment.update(self.logger, step)
 
             # --- Rendering Step ---
             self.renderer.draw(self.environment, step)
-
-            # --- Logging Step ---
-            for agent in self.environment.agents:
-                pos = agent.position
-                # This is a high-frequency message, better suited for DEBUG level.
-                self.logger.debug(
-                    f"Agent {agent.id} updated position to ({pos[0]:.2f}, {pos[1]:.2f})"
-                )
             
             step += 1
 

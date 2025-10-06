@@ -7,6 +7,7 @@ import numpy as np
 from src.agent import Agent
 import constants
 import logging
+import math
 
 class Apple:
     """A simple class for apple items."""
@@ -35,6 +36,13 @@ class Obstacle:
 class Environment:
     def __init__(self, config: dict):
         self.config = config # Store the config for later use
+        
+        # --- Day/Night Cycle Initialization ---
+        cycle_config = config.get("day_night_cycle", {})
+        self.cycle_duration = cycle_config.get("cycle_duration_steps", 24000) # Default to 24k steps
+        self.day_duration_percent = cycle_config.get("day_duration_percent", 0.5)
+        self.is_day = True # Start during the day
+        
         self.agents = []
         agent_props = config["agent_properties"]
         
@@ -50,8 +58,7 @@ class Environment:
                 id=i,
                 position=initial_pos,
                 velocity=initial_vel,
-                # Unpack the shared properties from the config
-                **agent_props
+                properties=agent_props
             )
             self.agents.append(agent)
 
@@ -196,8 +203,42 @@ class Environment:
             if collided:
                 logger.debug(f"Agent {agent.id} collided with boundary.")
 
-    def update(self, logger: logging.LoggerAdapter):
+    @property
+    def light_level(self) -> float:
+        """
+        Calculates the current ambient light level (0.0 to 1.0) based on the time of day.
+        Uses a cosine function for a smooth transition.
+        """
+        phase = (self.world_step % self.cycle_duration) / self.cycle_duration
+        # A cosine wave shifted and scaled to be in the [0, 1] range.
+        # It's 1.0 at phase 0.25 (noon) and 0.0 at phase 0.75 (midnight).
+        light = (math.cos((phase - 0.25) * 2 * math.pi) + 1) / 2.0
+        return light
+
+    def update(self, logger: logging.LoggerAdapter, step: int):
         """Updates the state of all agents and objects in the environment."""
+        self.world_step = step
+        
+        # --- Day/Night Cycle Update ---
+        was_day = self.is_day
+        # Transition to night when the sun sets past the horizon
+        night_start_phase = self.day_duration_percent / 2 + 0.25
+        day_start_phase = 1.0 - (self.day_duration_percent / 2) + 0.25
+        
+        current_phase = (self.world_step % self.cycle_duration) / self.cycle_duration
+        
+        # Handle phase wrapping around 1.0 for day start
+        if day_start_phase >= 1.0:
+            day_start_phase -= 1.0
+            self.is_day = current_phase >= day_start_phase or current_phase < night_start_phase
+        else:
+            self.is_day = day_start_phase <= current_phase < night_start_phase
+
+        if was_day and not self.is_day:
+            logger.info("The sky darkens. Night has begun.")
+        elif not was_day and self.is_day:
+            logger.info("The sun rises. Day has begun.")
+
         # --- Apple Spawning Step ---
         # Note: This logic will be expanded later to remove eaten apples from tree lists.
         tree_config = self.config.get("apple_trees", {})
@@ -224,6 +265,6 @@ class Environment:
 
         # --- Agent State Update ---
         for agent in self.agents:
-            agent.update(self, logger)
+            agent.update(self, logger, step)
         
         self._resolve_collisions(logger)

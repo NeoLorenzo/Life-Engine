@@ -41,6 +41,7 @@ GAIT_AMPLITUDE_SIDEWAYS = 6 # How far feet step out to the side
 
 # Animation parameters
 SIT_STAND_ANIMATION_DURATION = 15 # Duration in steps (frames) for the animation
+SLEEP_ANIMATION_DURATION = 30
 PICKUP_ANIMATION_DURATION = 20
 EAT_ANIMATION_DURATION = 90
 

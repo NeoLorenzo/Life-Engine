@@ -47,8 +47,12 @@ class Renderer:
             environment (Environment): The simulation environment to render.
             step (int): The current simulation step, for display.
         """
-        # 1. Fill the background
-        self.screen.fill(constants.BACKGROUND_COLOR)
+        # 1. Fill the background based on the time of day
+        light_level = environment.light_level
+        bg_r = int(constants.BACKGROUND_COLOR[0] * light_level)
+        bg_g = int(constants.BACKGROUND_COLOR[1] * light_level)
+        bg_b = int(constants.BACKGROUND_COLOR[2] * light_level)
+        self.screen.fill((bg_r, bg_g, bg_b))
 
         # 2. Draw all obstacles
         for obstacle in environment.obstacles:
@@ -86,35 +90,37 @@ class Renderer:
             forward_angle = math.atan2(agent.forward_vector[1], agent.forward_vector[0])
 
             # --- 2. Draw Large Vision Cone (for trees) ---
-            large_start_angle = forward_angle - agent.large_field_of_view_rad / 2
-            large_end_angle = forward_angle + agent.large_field_of_view_rad / 2
-            
-            large_points = [center_point]
-            num_segments = 20
-            for i in range(num_segments + 1):
-                angle = large_start_angle + (large_end_angle - large_start_angle) * i / num_segments
-                x = center_point[0] + agent.large_vision_range * math.cos(angle)
-                y = center_point[1] + agent.large_vision_range * math.sin(angle)
-                large_points.append((x, y))
-            
-            large_cone_surface = pygame.Surface((constants.SCREEN_WIDTH, constants.SCREEN_HEIGHT), pygame.SRCALPHA)
-            pygame.draw.polygon(large_cone_surface, constants.LARGE_VISION_CONE_COLOR, large_points)
-            self.screen.blit(large_cone_surface, (0, 0))
+            if agent.current_large_vision_range > 0: # Only process if vision is active
+                large_start_angle = forward_angle - agent.large_field_of_view_rad / 2
+                large_end_angle = forward_angle + agent.large_field_of_view_rad / 2
+                
+                large_points = [center_point]
+                num_segments = 20
+                for i in range(num_segments + 1):
+                    angle = large_start_angle + (large_end_angle - large_start_angle) * i / num_segments
+                    x = center_point[0] + agent.current_large_vision_range * math.cos(angle)
+                    y = center_point[1] + agent.current_large_vision_range * math.sin(angle)
+                    large_points.append((x, y))
+                
+                large_cone_surface = pygame.Surface((constants.SCREEN_WIDTH, constants.SCREEN_HEIGHT), pygame.SRCALPHA)
+                pygame.draw.polygon(large_cone_surface, constants.LARGE_VISION_CONE_COLOR, large_points)
+                self.screen.blit(large_cone_surface, (0, 0))
 
             # --- 3. Draw Standard Vision Cone (for apples) ---
-            start_angle = forward_angle - agent.field_of_view_rad / 2
-            end_angle = forward_angle + agent.field_of_view_rad / 2
-            
-            points = [center_point]
-            for i in range(num_segments + 1):
-                angle = start_angle + (end_angle - start_angle) * i / num_segments
-                x = center_point[0] + agent.vision_range * math.cos(angle)
-                y = center_point[1] + agent.vision_range * math.sin(angle)
-                points.append((x, y))
-            
-            cone_surface = pygame.Surface((constants.SCREEN_WIDTH, constants.SCREEN_HEIGHT), pygame.SRCALPHA)
-            pygame.draw.polygon(cone_surface, constants.VISION_CONE_COLOR, points)
-            self.screen.blit(cone_surface, (0, 0))
+            if agent.current_vision_range > 0: # Only process if vision is active
+                start_angle = forward_angle - agent.field_of_view_rad / 2
+                end_angle = forward_angle + agent.field_of_view_rad / 2
+                
+                points = [center_point]
+                for i in range(num_segments + 1):
+                    angle = start_angle + (end_angle - start_angle) * i / num_segments
+                    x = center_point[0] + agent.current_vision_range * math.cos(angle)
+                    y = center_point[1] + agent.current_vision_range * math.sin(angle)
+                    points.append((x, y))
+                
+                cone_surface = pygame.Surface((constants.SCREEN_WIDTH, constants.SCREEN_HEIGHT), pygame.SRCALPHA)
+                pygame.draw.polygon(cone_surface, constants.VISION_CONE_COLOR, points)
+                self.screen.blit(cone_surface, (0, 0))
 
             # --- 4. Define Orientations and Vectors ---
             body_angle_rad = math.atan2(agent.velocity[1], agent.velocity[0]) if np.linalg.norm(agent.velocity) > 0.1 else math.atan2(agent.heading_vector[1], agent.heading_vector[0])
@@ -151,6 +157,16 @@ class Renderer:
             right_hand_pos_sit = agent.position + hands_side_sit + hands_back_sit
             left_hand_pos_sit = agent.position - hands_side_sit + hands_back_sit
 
+            # --- Sleeping Pose Calculation ---
+            sleep_torso_dims = (constants.SHOULDER_WIDTH, constants.TORSO_DEPTH * 2.5)
+            feet_pos_base_sleep = agent.position - body_forward_vector * (sleep_torso_dims[1] / 2 + constants.FOOT_HEIGHT / 2)
+            right_foot_pos_sleep = feet_pos_base_sleep + body_right_vector * (sleep_torso_dims[0] / 4)
+            left_foot_pos_sleep = feet_pos_base_sleep - body_right_vector * (sleep_torso_dims[0] / 4)
+            hands_pos_base_sleep = agent.position
+            right_hand_pos_sleep = hands_pos_base_sleep + body_right_vector * (constants.SHOULDER_WIDTH / 2 + constants.HAND_RADIUS)
+            left_hand_pos_sleep = hands_pos_base_sleep - body_right_vector * (constants.SHOULDER_WIDTH / 2 + constants.HAND_RADIUS)
+            head_pos_sleep = agent.position + body_forward_vector * (sleep_torso_dims[1] / 2 + constants.HEAD_RADIUS)
+
             # --- 4. Define Additional Poses ---
             # --- Bending Over Pose (for picking up) ---
             hands_fwd_bend = body_forward_vector * (constants.TORSO_DEPTH + constants.HAND_RADIUS)
@@ -168,6 +184,22 @@ class Renderer:
             elif agent.state == "resting":
                 right_foot_pos, left_foot_pos = right_foot_pos_sit, left_foot_pos_sit
                 right_hand_pos, left_hand_pos = right_hand_pos_sit, left_hand_pos_sit
+            elif agent.state == "sleeping":
+                # Use a desaturated color to show inactivity
+                torso_color = tuple(int(c * 0.7) for c in agent.color)
+                
+                # Define the LONGER torso dimensions for sleeping
+                sleep_torso_dims = (constants.SHOULDER_WIDTH, constants.TORSO_DEPTH * 2.5)
+                
+                # Feet are positioned at the "bottom" of the longer torso
+                feet_pos_base = agent.position - body_forward_vector * (sleep_torso_dims[1] / 2 + constants.FOOT_HEIGHT / 2)
+                right_foot_pos = feet_pos_base + body_right_vector * (sleep_torso_dims[0] / 4)
+                left_foot_pos = feet_pos_base - body_right_vector * (sleep_torso_dims[0] / 4)
+
+                # Hands are positioned at the sides of the torso (normal width)
+                hands_pos_base = agent.position
+                right_hand_pos = hands_pos_base + body_right_vector * (constants.SHOULDER_WIDTH / 2 + constants.HAND_RADIUS)
+                left_hand_pos = hands_pos_base - body_right_vector * (constants.SHOULDER_WIDTH / 2 + constants.HAND_RADIUS)
             elif agent.state == "eating":
                 right_foot_pos, left_foot_pos = right_foot_pos_walk, left_foot_pos_walk # Use walking pose with 0 speed
                 right_hand_pos, left_hand_pos = right_hand_pos_eat, left_hand_pos_eat
@@ -178,14 +210,30 @@ class Renderer:
                 left_foot_pos = agent.position + np.array([-8, -12])
                 right_hand_pos = agent.position + np.array([12, -8])
                 left_hand_pos = agent.position + np.array([-10, 10])
-            else: # Animating (sit/stand/pickup)
+            else: # Animating (sit/stand/pickup/sleep)
+                # Default start pose is a still walking pose
+                start_foot_r, end_foot_r = right_foot_pos_walk, right_foot_pos_walk
+                start_foot_l, end_foot_l = left_foot_pos_walk, left_foot_pos_walk
+                start_hand_r, end_hand_r = right_hand_pos_walk, right_hand_pos_walk
+                start_hand_l, end_hand_l = left_hand_pos_walk, left_hand_pos_walk
+
                 if agent.state == "sitting_down":
                     progress = (constants.SIT_STAND_ANIMATION_DURATION - agent.animation_timer) / constants.SIT_STAND_ANIMATION_DURATION
-                    start_foot_r, end_foot_r = right_foot_pos_walk, right_foot_pos_sit
-                    start_foot_l, end_foot_l = left_foot_pos_walk, left_foot_pos_sit
-                    start_hand_r, end_hand_r = right_hand_pos_walk, right_hand_pos_sit
-                    start_hand_l, end_hand_l = left_hand_pos_walk, left_hand_pos_sit
+                    end_foot_r, end_foot_l = right_foot_pos_sit, left_foot_pos_sit
+                    end_hand_r, end_hand_l = right_hand_pos_sit, left_hand_pos_sit
                 elif agent.state == "standing_up":
+                    progress = (constants.SIT_STAND_ANIMATION_DURATION - agent.animation_timer) / constants.SIT_STAND_ANIMATION_DURATION
+                    start_foot_r, start_foot_l = right_foot_pos_sit, left_foot_pos_sit
+                    start_hand_r, start_hand_l = right_hand_pos_sit, left_hand_pos_sit
+                elif agent.state == "lying_down":
+                    progress = (constants.SLEEP_ANIMATION_DURATION - agent.animation_timer) / constants.SLEEP_ANIMATION_DURATION
+                    end_foot_r, end_foot_l = right_foot_pos_sleep, left_foot_pos_sleep
+                    end_hand_r, end_hand_l = right_hand_pos_sleep, left_hand_pos_sleep
+                elif agent.state == "getting_up":
+                    progress = (constants.SLEEP_ANIMATION_DURATION - agent.animation_timer) / constants.SLEEP_ANIMATION_DURATION
+                    start_foot_r, start_foot_l = right_foot_pos_sleep, left_foot_pos_sleep
+                    start_hand_r, start_hand_l = right_hand_pos_sleep, left_hand_pos_sleep
+                elif agent.state == "picking_up":
                     progress = (constants.SIT_STAND_ANIMATION_DURATION - agent.animation_timer) / constants.SIT_STAND_ANIMATION_DURATION
                     start_foot_r, end_foot_r = right_foot_pos_sit, right_foot_pos_walk
                     start_foot_l, end_foot_l = left_foot_pos_sit, left_foot_pos_walk
@@ -216,18 +264,51 @@ class Renderer:
             pygame.draw.circle(self.screen, hand_color, right_hand_pos.astype(int), constants.HAND_RADIUS)
 
             # Torso (shoulders) - Drawn AFTER limbs so it appears on top
-            self._draw_rotated_rect(self.screen, (constants.SHOULDER_WIDTH, constants.TORSO_DEPTH), agent.position, -body_angle_deg - 90, torso_color)
+            torso_dims = np.array([constants.SHOULDER_WIDTH, constants.TORSO_DEPTH])
+            if agent.state == "sleeping":
+                torso_dims = np.array(sleep_torso_dims)
+            elif agent.state in ["lying_down", "getting_up"]:
+                start_dims = np.array([constants.SHOULDER_WIDTH, constants.TORSO_DEPTH])
+                end_dims = np.array(sleep_torso_dims)
+                
+                if agent.state == "lying_down":
+                    progress = (constants.SLEEP_ANIMATION_DURATION - agent.animation_timer) / constants.SLEEP_ANIMATION_DURATION
+                    torso_dims = start_dims + (end_dims - start_dims) * progress
+                else: # getting_up
+                    progress = (constants.SLEEP_ANIMATION_DURATION - agent.animation_timer) / constants.SLEEP_ANIMATION_DURATION
+                    torso_dims = end_dims + (start_dims - end_dims) * progress
+
+            self._draw_rotated_rect(self.screen, tuple(torso_dims), agent.position, -body_angle_deg - 90, torso_color)
             
             # Neck and Head
             head_color = constants.DEAD_AGENT_COLOR if agent.state == "dead" else constants.HEAD_COLOR
             neck_color = constants.DEAD_AGENT_COLOR if agent.state == "dead" else constants.NECK_COLOR
-            head_pos = agent.position + agent.heading_vector * (constants.TORSO_DEPTH * 0.6)
-            neck_pos = agent.position + agent.heading_vector * (constants.TORSO_DEPTH * 0.3)
-            self._draw_rotated_rect(self.screen, (constants.NECK_WIDTH, constants.NECK_HEIGHT), neck_pos, math.degrees(math.atan2(agent.heading_vector[1], agent.heading_vector[0])), neck_color)
-            pygame.draw.circle(self.screen, head_color, head_pos.astype(int), constants.HEAD_RADIUS)
+            
+            # Default head position for non-sleeping states
+            head_pos_default = agent.position + agent.heading_vector * (constants.TORSO_DEPTH * 0.6)
+
+            if agent.state == "sleeping":
+                head_pos = head_pos_sleep
+                pygame.draw.circle(self.screen, head_color, head_pos.astype(int), constants.HEAD_RADIUS)
+            elif agent.state in ["lying_down", "getting_up"]:
+                if agent.state == "lying_down":
+                    progress = (constants.SLEEP_ANIMATION_DURATION - agent.animation_timer) / constants.SLEEP_ANIMATION_DURATION
+                    head_pos = head_pos_default + (head_pos_sleep - head_pos_default) * progress
+                else: # getting_up
+                    progress = (constants.SLEEP_ANIMATION_DURATION - agent.animation_timer) / constants.SLEEP_ANIMATION_DURATION
+                    head_pos = head_pos_sleep + (head_pos_default - head_pos_sleep) * progress
+                pygame.draw.circle(self.screen, head_color, head_pos.astype(int), constants.HEAD_RADIUS)
+            else:
+                # Default behavior for all other states with a visible neck and dynamic head
+                head_pos = head_pos_default
+                neck_pos = agent.position + agent.heading_vector * (constants.TORSO_DEPTH * 0.3)
+                self._draw_rotated_rect(self.screen, (constants.NECK_WIDTH, constants.NECK_HEIGHT), neck_pos, math.degrees(math.atan2(agent.heading_vector[1], agent.heading_vector[0])), neck_color)
+                pygame.draw.circle(self.screen, head_color, head_pos.astype(int), constants.HEAD_RADIUS)
         
         # 4. Draw the current step counter
-        step_text = self.font.render(f"Step: {step}", True, (0, 0, 0))
+        # Text color should be white at night for readability
+        text_color = (0, 0, 0) if light_level > 0.3 else (255, 255, 255)
+        step_text = self.font.render(f"Step: {step}", True, text_color)
         self.screen.blit(step_text, (10, 10))
 
         # 5. Draw Tree Canopies (on top of everything else)
@@ -245,7 +326,7 @@ class Renderer:
             self.screen.blit(canopy_surface, top_left_pos)
 
         # 6. Draw the current step counter
-        step_text = self.font.render(f"Step: {step}", True, (0, 0, 0))
+        step_text = self.font.render(f"Step: {step}", True, text_color)
         self.screen.blit(step_text, (10, 10))
 
         # 7. Update the display

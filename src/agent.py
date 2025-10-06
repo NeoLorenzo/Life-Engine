@@ -23,50 +23,66 @@ import random
 # create a circular dependency. We use a string hint ('Environment') to avoid this.
 
 class Agent:
-    def __init__(self, id: int, position: list[float], velocity: list[float], collision_radius: float, max_stamina: float, stamina_consumption_rate: float, stamina_regeneration_rate: float, tired_threshold_percent: float, rest_threshold_percent: float, wake_threshold_percent: float, context_map_resolution: int, threat_detection_range: float, danger_avoidance_strength: float, flocking_range: float, flocking_strength: float, max_speed: float, max_force: float, friction_strength: float, vision_range: float, field_of_view: float, large_vision_range: float, large_field_of_view: float, wander_distance: float, wander_radius: float, head_scan_angle: float, head_scan_speed: float, head_turn_speed: float, initial_hunger: float, max_hunger: float, hunger_decay_rate: float, hunger_per_apple: float, hungry_threshold_percent: float):
+    def __init__(self, id: int, position: list[float], velocity: list[float], properties: dict):
         self.id = id
-        self.radius = collision_radius
         self.position = np.array(position, dtype=np.float64)
         self.velocity = np.array(velocity, dtype=np.float64)
+        
+        # Unpack properties from the dictionary using .get() for safety
+        self.radius = properties.get("collision_radius", 8.0)
         self.color = random.choice(constants.AGENT_COLORS)
-        self.flocking_range = flocking_range
-        self.flocking_strength = flocking_strength
+        self.flocking_range = properties.get("flocking_range", 150.0)
+        self.flocking_strength = properties.get("flocking_strength", 0.5)
         self.acceleration = np.zeros(2, dtype=np.float64)
         
         initial_heading = self.velocity / np.linalg.norm(self.velocity) if np.linalg.norm(self.velocity) > 0 else np.array([1.0, 0.0])
         self.heading_vector = initial_heading
         
-        self.base_max_speed = max_speed
-        self.max_speed = max_speed
-        self.max_force = max_force
-        self.head_turn_speed = head_turn_speed
-        self.friction_strength = friction_strength
-        self.vision_range = vision_range
-        self.large_vision_range = large_vision_range
-        self.wander_distance = wander_distance
-        self.wander_radius = wander_radius
+        self.base_max_speed = properties.get("max_speed", 1.5)
+        self.max_speed = self.base_max_speed
+        self.max_force = properties.get("max_force", 0.05)
+        self.head_turn_speed = properties.get("head_turn_speed", 0.1)
+        self.friction_strength = properties.get("friction_strength", 0.99)
+        self.base_vision_range = properties.get("vision_range", 150)
+        self.base_large_vision_range = properties.get("large_vision_range", 300)
+        self.vision_clarity_in_darkness = properties.get("vision_clarity_in_darkness_percent", 0.1)
+        self.current_vision_range = self.base_vision_range
+        self.current_large_vision_range = self.base_large_vision_range
+        self.wander_distance = properties.get("wander_distance", 100)
+        self.wander_radius = properties.get("wander_radius", 50)
         self.wander_target = None
         
-        self.max_stamina = max_stamina
-        self.stamina = max_stamina
-        self.stamina_consumption_rate = stamina_consumption_rate
-        self.stamina_regeneration_rate = stamina_regeneration_rate
-        self.tired_threshold = max_stamina * tired_threshold_percent
-        self.rest_threshold = max_stamina * rest_threshold_percent
-        self.wake_threshold = max_stamina * wake_threshold_percent
+        self.max_stamina = properties.get("max_stamina", 100.0)
+        self.stamina = self.max_stamina
+        self.stamina_consumption_rate = properties.get("stamina_consumption_rate", 0.05)
+        self.stamina_regeneration_rate = properties.get("stamina_regeneration_rate", 0.4)
+        self.tired_threshold = self.max_stamina * properties.get("tired_threshold_percent", 0.4)
+        self.rest_threshold = self.max_stamina * properties.get("rest_threshold_percent", 0.1)
+        self.wake_threshold = self.max_stamina * properties.get("wake_threshold_percent", 0.95)
         
-        self.max_hunger = max_hunger
-        self.hunger = initial_hunger
-        self.hunger_decay_rate = hunger_decay_rate
-        self.hunger_per_apple = hunger_per_apple
-        self.hungry_threshold = max_hunger * hungry_threshold_percent
+        self.max_hunger = properties.get("max_hunger", 2500.0)
+        self.hunger = properties.get("initial_hunger", 2000.0)
+        self.hunger_decay_rate = properties.get("hunger_decay_rate", 0.1)
+        self.hunger_per_apple = properties.get("hunger_per_apple", 500.0)
+        self.hungry_threshold = self.max_hunger * properties.get("hungry_threshold_percent", 0.6)
+
+        # --- Vigilance System ---
+        vigilance_system = properties.get("vigilance_system", {})
+        self.max_vigilance = vigilance_system.get("max_vigilance", 100.0)
+        self.vigilance = vigilance_system.get("initial_vigilance", 100.0)
+        self.vigilance_decay_day = vigilance_system.get("decay_rate_day", 0.075)
+        self.vigilance_decay_night = vigilance_system.get("decay_rate_night", 0.15)
+        self.vigilance_regeneration_rate = vigilance_system.get("regeneration_rate", 0.5)
+        self.sleep_threshold = self.max_vigilance * vigilance_system.get("sleep_threshold_percent", 0.1)
+        self.wake_vigilance_threshold = self.max_vigilance * vigilance_system.get("wake_threshold_percent", 0.95)
+        self.stamina_vigilance_floor = vigilance_system.get("stamina_vigilance_floor_percent", 0.2)
         
-        self.head_scan_angle_rad = math.radians(head_scan_angle)
-        self.head_scan_speed = head_scan_speed
+        self.head_scan_angle_rad = math.radians(properties.get("head_scan_angle", 80))
+        self.head_scan_speed = properties.get("head_scan_speed", 0.05)
         self.scan_phase = 0.0
         
         self.state = "wandering"
-        # New states: "seeking_tree", "searching_for_apple", "moving_to_apple", "picking_up", "eating", "dead"
+        # New states: "seeking_tree", "searching_for_apple", "moving_to_apple", "picking_up", "eating", "dead", "sleeping", "lying_down", "getting_up"
         self.target_entity = None
         self.search_anchor_point = None
         self.search_angle = np.random.uniform(0, 2 * np.pi)
@@ -74,14 +90,14 @@ class Agent:
         self.gait_phase = 0.0
         self.gait_speed = 0.2
         
-        self.field_of_view_rad = math.radians(field_of_view)
+        self.field_of_view_rad = math.radians(properties.get("field_of_view", 120))
         self.cos_fov_half = math.cos(self.field_of_view_rad / 2.0)
-        self.large_field_of_view_rad = math.radians(large_field_of_view)
+        self.large_field_of_view_rad = math.radians(properties.get("large_field_of_view", 160))
 
         # --- Context Steering Architecture ---
-        self.map_resolution = context_map_resolution
-        self.threat_range = threat_detection_range
-        self.danger_avoidance_strength = danger_avoidance_strength
+        self.map_resolution = properties.get("context_map_resolution", 32)
+        self.threat_range = properties.get("threat_detection_range", 60.0)
+        self.danger_avoidance_strength = properties.get("danger_avoidance_strength", 4.0)
         self.interest_map = np.zeros(self.map_resolution)
         self.danger_map = np.zeros(self.map_resolution)
         # Pre-calculate direction vectors for each slot in the map
@@ -200,7 +216,7 @@ class Agent:
             visible_apples = []
             for apple in environment.apples:
                 vec_to_apple = apple.position - self.position
-                if np.dot(vec_to_apple, vec_to_apple) < self.vision_range**2:
+                if np.dot(vec_to_apple, vec_to_apple) < self.current_vision_range**2:
                     visible_apples.append(apple)
             
             if visible_apples:
@@ -217,7 +233,7 @@ class Agent:
                 visible_trees = []
                 for tree in environment.trees:
                     vec_to_tree = tree.position - self.position
-                    if np.dot(vec_to_tree, vec_to_tree) < self.large_vision_range**2:
+                    if np.dot(vec_to_tree, vec_to_tree) < self.current_large_vision_range**2:
                         visible_trees.append(tree)
                 
                 if visible_trees:
@@ -254,6 +270,22 @@ class Agent:
 
     def perceive_and_act(self, environment: 'Environment', logger: logging.LoggerAdapter):
         """The agent's 'brain'. Decides what to do based on its state and environment."""
+        # --- Universal State Transitions (Vigilance/Sleeping) ---
+        if self.state == "sleeping" and self.vigilance >= self.wake_vigilance_threshold:
+            self.state = "getting_up"
+            self.animation_timer = constants.SLEEP_ANIMATION_DURATION
+            self.stamina = self.max_stamina # Restore stamina when the decision to wake is made
+            logger.info(f"Agent {self.id} is getting up. Stamina restored.")
+            return
+
+        is_sleep_deprived = self.vigilance < self.sleep_threshold
+        can_sleep = self.state not in ["sitting_down", "resting", "sleeping", "picking_up", "eating", "dead", "lying_down", "getting_up"]
+        if is_sleep_deprived and can_sleep:
+            self.state = "lying_down"
+            self.animation_timer = constants.SLEEP_ANIMATION_DURATION
+            logger.info(f"Agent {self.id} is lying down to sleep.")
+            return
+
         # --- Universal State Transitions (Stamina/Resting) ---
         if self.state == "resting" and self.stamina >= self.wake_threshold:
             self.state = "standing_up"
@@ -270,7 +302,7 @@ class Agent:
             return
 
         # States that block perception/action
-        blocking_states = ["sitting_down", "standing_up", "resting", "picking_up", "eating", "dead"]
+        blocking_states = ["sitting_down", "standing_up", "resting", "picking_up", "eating", "dead", "sleeping", "lying_down", "getting_up"]
         if self.state in blocking_states:
             return
 
@@ -281,14 +313,14 @@ class Agent:
         if self.state == "wandering" and is_hungry:
             self.max_speed = self.base_max_speed # Ensure speed is reset
             # Look for apples first
-            visible_apples = [a for a in environment.apples if np.dot(a.position - self.position, a.position - self.position) < self.vision_range**2]
+            visible_apples = [a for a in environment.apples if np.dot(a.position - self.position, a.position - self.position) < self.current_vision_range**2]
             if visible_apples:
                 self.target_entity = min(visible_apples, key=lambda a: np.linalg.norm(a.position - self.position))
                 self.state = "moving_to_apple"
                 logger.info(f"Agent {self.id} is hungry and sees an apple. Moving to it.")
             else:
                 # If no apples, look for trees
-                visible_trees = [t for t in environment.trees if np.dot(t.position - self.position, t.position - self.position) < self.large_vision_range**2]
+                visible_trees = [t for t in environment.trees if np.dot(t.position - self.position, t.position - self.position) < self.current_large_vision_range**2]
                 if visible_trees:
                     self.target_entity = min(visible_trees, key=lambda t: np.linalg.norm(t.position - self.position))
                     self.state = "seeking_tree"
@@ -310,7 +342,7 @@ class Agent:
         # --- Searching for Apple State ---
         elif self.state == "searching_for_apple":
             self.max_speed = self.base_max_speed # Ensure speed is reset
-            visible_apples = [a for a in environment.apples if np.dot(a.position - self.position, a.position - self.position) < self.vision_range**2]
+            visible_apples = [a for a in environment.apples if np.dot(a.position - self.position, a.position - self.position) < self.current_vision_range**2]
             if visible_apples:
                 self.target_entity = min(visible_apples, key=lambda a: np.linalg.norm(a.position - self.position))
                 self.state = "moving_to_apple"
@@ -360,10 +392,42 @@ class Agent:
         self.heading_vector = (self.heading_vector * 0.9) + (best_direction_vector * 0.1)
         self.heading_vector /= np.linalg.norm(self.heading_vector)
 
-    def update(self, environment: 'Environment', logger: logging.LoggerAdapter):
+    def update(self, environment: 'Environment', logger: logging.LoggerAdapter, step: int):
         """Updates the agent's state based on physics."""
         # Dead agents do nothing.
         if self.state == "dead":
+            return
+
+        # --- Update Sensory Acuity based on Environment ---
+        light_level = environment.light_level
+        vision_factor = self.vision_clarity_in_darkness + (1.0 - self.vision_clarity_in_darkness) * light_level
+        
+        # Vision is disabled completely when sleeping or in related states
+        if self.state in ["sleeping", "lying_down", "getting_up"]:
+            vision_factor = 0.0
+
+        self.current_vision_range = self.base_vision_range * vision_factor
+        self.current_large_vision_range = self.base_large_vision_range * vision_factor
+        
+        if step % 100 == 0:
+            logger.debug(f"Agent {self.id} light_level {light_level:.2f} -> vision_range {self.current_vision_range:.1f}")
+
+        # --- Vigilance Update ---
+        if self.state == "sleeping":
+            self.vigilance = min(self.max_vigilance, self.vigilance + self.vigilance_regeneration_rate)
+            if step % 100 == 0: # Throttle logging (Rule 2.4)
+                logger.debug(f"Agent {self.id} sleeping. Vigilance is now {self.vigilance:.2f}")
+        else:
+            light_level = environment.light_level
+            # Linearly interpolate between night and day decay rates
+            effective_decay_rate = self.vigilance_decay_night * (1.0 - light_level) + self.vigilance_decay_day * light_level
+            self.vigilance = max(0, self.vigilance - effective_decay_rate)
+            if step % 100 == 0: # Throttle logging (Rule 2.4)
+                logger.debug(f"Agent {self.id} vigilance is {self.vigilance:.2f} (decay rate: {effective_decay_rate:.3f})")
+
+        if self.state == "sleeping":
+            self.velocity *= 0
+            self.acceleration.fill(0)
             return
 
         if self.state == "resting":
@@ -372,14 +436,18 @@ class Agent:
             self.acceleration.fill(0)
             return
 
-        if self.state in ["sitting_down", "standing_up"]:
+        if self.state in ["sitting_down", "standing_up", "lying_down", "getting_up"]:
             self.velocity *= 0.8 # Slow to a stop while animating
             self.acceleration.fill(0)
             self.animation_timer -= 1
             if self.animation_timer <= 0:
                 if self.state == "sitting_down":
                     self.state = "resting"
-                else: # standing_up
+                elif self.state == "standing_up":
+                    self.state = "wandering"
+                elif self.state == "lying_down":
+                    self.state = "sleeping"
+                elif self.state == "getting_up":
                     self.state = "wandering"
             return
         
@@ -421,13 +489,24 @@ class Agent:
             return # Stop further processing for this step
 
         # --- Stamina Consumption and Speed Reduction ---
+        # Vigilance now caps the maximum possible stamina.
+        vigilance_factor = self.vigilance / self.max_vigilance
+        stamina_cap_factor = self.stamina_vigilance_floor + (1.0 - self.stamina_vigilance_floor) * vigilance_factor
+        current_max_stamina = self.max_stamina * stamina_cap_factor
+        self.stamina = min(self.stamina, current_max_stamina)
+        
+        if step % 100 == 0:
+            logger.debug(f"Agent {self.id} vigilance {self.vigilance:.1f} -> stamina cap {current_max_stamina:.1f}")
+
         current_speed = np.linalg.norm(self.velocity)
         stamina_consumed = current_speed * self.stamina_consumption_rate
         self.stamina = max(0, self.stamina - stamina_consumed)
 
-        if self.stamina < self.tired_threshold:
+        # The tired threshold is now relative to the current maximum stamina.
+        current_tired_threshold = current_max_stamina * (self.tired_threshold / self.max_stamina)
+        if self.stamina < current_tired_threshold:
             # Reduce max speed proportionally to remaining stamina below the threshold
-            speed_multiplier = self.stamina / self.tired_threshold
+            speed_multiplier = self.stamina / current_tired_threshold if current_tired_threshold > 0 else 0
             self.max_speed = self.base_max_speed * max(0.1, speed_multiplier) # Ensure a small minimum speed
         else:
             self.max_speed = self.base_max_speed # Restore full speed
