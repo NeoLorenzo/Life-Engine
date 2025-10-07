@@ -37,7 +37,7 @@ def main():
     logger.info(f"Master seed set to {seed}.")
 
     # 4. Initialize and Run Simulation
-    renderer = Renderer()
+    renderer = Renderer(config)
     try:
         sim = Simulation(config, logger, renderer)
         sim.run()

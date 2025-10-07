@@ -63,3 +63,4 @@ DEAD_AGENT_COLOR = (50, 50, 50) # Dark Grey
 # RGBA format for transparency (A=alpha)
 VISION_CONE_COLOR = (200, 200, 255, 100)
 LARGE_VISION_CONE_COLOR = (255, 255, 200, 80) # Yellowish
+MEMORY_LOCATION_COLOR = (150, 50, 200) # Purple

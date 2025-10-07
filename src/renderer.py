@@ -22,7 +22,7 @@ import numpy as np
 class Renderer:
     """Manages the Pygame window and draws the simulation state."""
 
-    def __init__(self):
+    def __init__(self, config: dict):
         pygame.init()
         self.screen = pygame.display.set_mode(
             (constants.SCREEN_WIDTH, constants.SCREEN_HEIGHT)
@@ -30,6 +30,7 @@ class Renderer:
         pygame.display.set_caption("Life-Engine")
         self.font = pygame.font.SysFont(None, 24)
         self.clock = pygame.time.Clock() # To control the frame rate
+        self.config = config # Store the config for visualization settings
 
     def _draw_rotated_rect(self, surface, rect_dims, center_pos, angle_deg, color):
         """Helper function to draw a rotated rectangle, centered correctly."""
@@ -89,40 +90,42 @@ class Renderer:
             center_point = head_pos
             forward_angle = math.atan2(agent.forward_vector[1], agent.forward_vector[0])
 
-            # --- 2. Draw Large Vision Cone (for trees) ---
-            if agent.current_large_vision_range > 0: # Only process if vision is active
-                large_start_angle = forward_angle - agent.large_field_of_view_rad / 2
-                large_end_angle = forward_angle + agent.large_field_of_view_rad / 2
-                
-                large_points = [center_point]
-                num_segments = 20
-                for i in range(num_segments + 1):
-                    angle = large_start_angle + (large_end_angle - large_start_angle) * i / num_segments
-                    x = center_point[0] + agent.current_large_vision_range * math.cos(angle)
-                    y = center_point[1] + agent.current_large_vision_range * math.sin(angle)
-                    large_points.append((x, y))
-                
-                large_cone_surface = pygame.Surface((constants.SCREEN_WIDTH, constants.SCREEN_HEIGHT), pygame.SRCALPHA)
-                pygame.draw.polygon(large_cone_surface, constants.LARGE_VISION_CONE_COLOR, large_points)
-                self.screen.blit(large_cone_surface, (0, 0))
+            # --- 2. Draw Vision Cones (if enabled) ---
+            if self.config["visualization"]["show_vision_cones"]:
+                # Draw Large Vision Cone (for trees)
+                if agent.current_large_vision_range > 0:
+                    large_start_angle = forward_angle - agent.large_field_of_view_rad / 2
+                    large_end_angle = forward_angle + agent.large_field_of_view_rad / 2
+                    
+                    large_points = [center_point]
+                    num_segments = 20
+                    for i in range(num_segments + 1):
+                        angle = large_start_angle + (large_end_angle - large_start_angle) * i / num_segments
+                        x = center_point[0] + agent.current_large_vision_range * math.cos(angle)
+                        y = center_point[1] + agent.current_large_vision_range * math.sin(angle)
+                        large_points.append((x, y))
+                    
+                    large_cone_surface = pygame.Surface((constants.SCREEN_WIDTH, constants.SCREEN_HEIGHT), pygame.SRCALPHA)
+                    pygame.draw.polygon(large_cone_surface, constants.LARGE_VISION_CONE_COLOR, large_points)
+                    self.screen.blit(large_cone_surface, (0, 0))
 
-            # --- 3. Draw Standard Vision Cone (for apples) ---
-            if agent.current_vision_range > 0: # Only process if vision is active
-                start_angle = forward_angle - agent.field_of_view_rad / 2
-                end_angle = forward_angle + agent.field_of_view_rad / 2
-                
-                points = [center_point]
-                for i in range(num_segments + 1):
-                    angle = start_angle + (end_angle - start_angle) * i / num_segments
-                    x = center_point[0] + agent.current_vision_range * math.cos(angle)
-                    y = center_point[1] + agent.current_vision_range * math.sin(angle)
-                    points.append((x, y))
-                
-                cone_surface = pygame.Surface((constants.SCREEN_WIDTH, constants.SCREEN_HEIGHT), pygame.SRCALPHA)
-                pygame.draw.polygon(cone_surface, constants.VISION_CONE_COLOR, points)
-                self.screen.blit(cone_surface, (0, 0))
+                # Draw Standard Vision Cone (for apples)
+                if agent.current_vision_range > 0:
+                    start_angle = forward_angle - agent.field_of_view_rad / 2
+                    end_angle = forward_angle + agent.field_of_view_rad / 2
+                    
+                    points = [center_point]
+                    for i in range(num_segments + 1):
+                        angle = start_angle + (end_angle - start_angle) * i / num_segments
+                        x = center_point[0] + agent.current_vision_range * math.cos(angle)
+                        y = center_point[1] + agent.current_vision_range * math.sin(angle)
+                        points.append((x, y))
+                    
+                    cone_surface = pygame.Surface((constants.SCREEN_WIDTH, constants.SCREEN_HEIGHT), pygame.SRCALPHA)
+                    pygame.draw.polygon(cone_surface, constants.VISION_CONE_COLOR, points)
+                    self.screen.blit(cone_surface, (0, 0))
 
-            # --- 4. Define Orientations and Vectors ---
+            # --- 3. Define Orientations and Vectors ---
             body_angle_rad = math.atan2(agent.velocity[1], agent.velocity[0]) if np.linalg.norm(agent.velocity) > 0.1 else math.atan2(agent.heading_vector[1], agent.heading_vector[0])
             body_angle_deg = math.degrees(body_angle_rad)
             
@@ -305,13 +308,7 @@ class Renderer:
                 self._draw_rotated_rect(self.screen, (constants.NECK_WIDTH, constants.NECK_HEIGHT), neck_pos, math.degrees(math.atan2(agent.heading_vector[1], agent.heading_vector[0])), neck_color)
                 pygame.draw.circle(self.screen, head_color, head_pos.astype(int), constants.HEAD_RADIUS)
         
-        # 4. Draw the current step counter
-        # Text color should be white at night for readability
-        text_color = (0, 0, 0) if light_level > 0.3 else (255, 255, 255)
-        step_text = self.font.render(f"Step: {step}", True, text_color)
-        self.screen.blit(step_text, (10, 10))
-
-        # 5. Draw Tree Canopies (on top of everything else)
+        # 4. Draw Tree Canopies (on top of agents, but below debug info)
         for tree in environment.trees:
             # Create a semi-transparent surface for the canopy
             canopy_surface = pygame.Surface((tree.canopy_radius * 2, tree.canopy_radius * 2), pygame.SRCALPHA)
@@ -325,7 +322,22 @@ class Renderer:
             top_left_pos = tree.position - tree.canopy_radius
             self.screen.blit(canopy_surface, top_left_pos)
 
-        # 6. Draw the current step counter
+        # 5. Draw Debug Visualizations (on top of everything else)
+        if self.config["visualization"]["show_memory_locations"]:
+            for agent in environment.agents:
+                # Draw the memory dot whenever a memory exists, not just when actively using it.
+                # This provides a persistent debug visual for the agent's target memory.
+                if agent.last_known_position is not None:
+                    pygame.draw.circle(
+                        self.screen,
+                        constants.MEMORY_LOCATION_COLOR,
+                        agent.last_known_position.astype(int),
+                        5 # Radius of the memory dot
+                    )
+
+        # 6. Draw the current step counter (UI Layer)
+        # Text color should be white at night for readability
+        text_color = (0, 0, 0) if light_level > 0.3 else (255, 255, 255)
         step_text = self.font.render(f"Step: {step}", True, text_color)
         self.screen.blit(step_text, (10, 10))
 

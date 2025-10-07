@@ -89,6 +89,12 @@ class Agent:
         self.animation_timer = 0
         self.gait_phase = 0.0
         self.gait_speed = 0.2
+
+        # --- Short-Term Memory ---
+        self.memory_persistence_steps = properties.get("memory_persistence_steps", 90)
+        self.memory_timer = 0
+        self.last_known_position = None
+        self.is_operating_from_memory = False # Flag for the renderer
         
         self.field_of_view_rad = math.radians(properties.get("field_of_view", 120))
         self.cos_fov_half = math.cos(self.field_of_view_rad / 2.0)
@@ -122,6 +128,38 @@ class Agent:
                 steering_force = (steering_force / norm_steering) * self.max_force
             return steering_force
         return np.zeros(2)
+
+    def _is_entity_visible(self, entity: object) -> bool:
+        """Checks if a given entity is within the agent's field of vision."""
+        # Use large vision range for trees, standard for others (e.g., apples)
+        vision_range = self.current_large_vision_range if hasattr(entity, 'canopy_radius') else self.current_vision_range
+        
+        vec_to_entity = entity.position - self.position
+        dist_sq = np.dot(vec_to_entity, vec_to_entity)
+
+        # 1. Check if the entity is within vision range
+        if dist_sq > vision_range**2:
+            return False
+
+        # 2. Check if the entity is within the field of view
+        if dist_sq > 1e-6: # Avoid division by zero if on top of the entity
+            vec_to_entity_normalized = vec_to_entity / np.sqrt(dist_sq)
+            dot_product = np.dot(self.heading_vector, vec_to_entity_normalized)
+            
+            # Determine correct FOV based on entity type
+            cos_fov = self.cos_fov_half # Default for standard vision
+            if hasattr(entity, 'canopy_radius'):
+                # This is a tree, so we need to calculate the cos of the large FOV
+                # We do it here to avoid storing another variable in __init__
+                cos_large_fov_half = math.cos(self.large_field_of_view_rad / 2.0)
+                cos_fov = cos_large_fov_half
+
+            if dot_product < cos_fov:
+                return False
+                
+        # NOTE: This is where a future raycast for occlusion would go.
+        # For now, if it's in range and in the cone, it's considered visible.
+        return True
 
     def _evaluate_context(self, environment: 'Environment'):
         """Populates the interest and danger maps based on the environment."""
@@ -165,17 +203,26 @@ class Agent:
                 self.danger_map += np.maximum(0, dot_products) * (danger_value ** 3)
 
         # Boundaries
-        boundary_points = [
-            (self.position[0], 0), (self.position[0], constants.SCREEN_HEIGHT),
-            (0, self.position[1]), (constants.SCREEN_WIDTH, self.position[1])
-        ]
-        for point in boundary_points:
-            vec_to_boundary = np.array(point) - self.position
-            dist = np.linalg.norm(vec_to_boundary)
-            if dist < self.threat_range:
-                danger_value = 1.0 - (dist / self.threat_range)
-                dot_products = np.dot(self.direction_vectors, vec_to_boundary / dist)
-                self.danger_map += np.maximum(0, dot_products) * (danger_value ** 2)
+        # If the agent is very close to an apple, it should ignore boundary danger to retrieve it.
+        ignore_boundary_danger = False
+        if self.state == "moving_to_apple" and self.target_entity is not None:
+            dist_to_target_sq = np.dot(self.target_entity.position - self.position, self.target_entity.position - self.position)
+            # Ignore danger if within half the threat range of the target apple.
+            if dist_to_target_sq < (self.threat_range * 0.5)**2:
+                ignore_boundary_danger = True
+
+        if not ignore_boundary_danger:
+            boundary_points = [
+                (self.position[0], 0), (self.position[0], constants.SCREEN_HEIGHT),
+                (0, self.position[1]), (constants.SCREEN_WIDTH, self.position[1])
+            ]
+            for point in boundary_points:
+                vec_to_boundary = np.array(point) - self.position
+                dist = np.linalg.norm(vec_to_boundary)
+                if dist < self.threat_range:
+                    danger_value = 1.0 - (dist / self.threat_range)
+                    dot_products = np.dot(self.direction_vectors, vec_to_boundary / dist)
+                    self.danger_map += np.maximum(0, dot_products) * (danger_value ** 2)
 
         # --- Evaluate INTEREST ---
         # Flocking (Cohesion)
@@ -312,15 +359,17 @@ class Agent:
         # --- Wandering State ---
         if self.state == "wandering" and is_hungry:
             self.max_speed = self.base_max_speed # Ensure speed is reset
-            # Look for apples first
-            visible_apples = [a for a in environment.apples if np.dot(a.position - self.position, a.position - self.position) < self.current_vision_range**2]
+            # Look for apples first, using the proper visibility check
+            visible_apples = [a for a in environment.apples if self._is_entity_visible(a)]
             if visible_apples:
                 self.target_entity = min(visible_apples, key=lambda a: np.linalg.norm(a.position - self.position))
                 self.state = "moving_to_apple"
+                # Immediately set the memory upon acquiring a target
+                self.last_known_position = self.target_entity.position.copy()
                 logger.info(f"Agent {self.id} is hungry and sees an apple. Moving to it.")
             else:
-                # If no apples, look for trees
-                visible_trees = [t for t in environment.trees if np.dot(t.position - self.position, t.position - self.position) < self.current_large_vision_range**2]
+                # If no apples, look for trees, using the proper visibility check
+                visible_trees = [t for t in environment.trees if self._is_entity_visible(t)]
                 if visible_trees:
                     self.target_entity = min(visible_trees, key=lambda t: np.linalg.norm(t.position - self.position))
                     self.state = "seeking_tree"
@@ -331,6 +380,19 @@ class Agent:
             if self.target_entity is None or not hasattr(self.target_entity, 'canopy_radius'):
                 self.state = "wandering" # Target is invalid
                 return
+
+            # --- Memory Update Logic ---
+            is_visible = self._is_entity_visible(self.target_entity)
+            if is_visible:
+                self.last_known_position = self.target_entity.position.copy()
+                self.memory_timer = self.memory_persistence_steps
+                if self.is_operating_from_memory:
+                    self.is_operating_from_memory = False
+                    logger.info(f"Agent {self.id} re-acquired target tree {self.target_entity.id}.")
+            elif self.memory_timer > 0 and not self.is_operating_from_memory:
+                self.is_operating_from_memory = True
+                logger.info(f"Agent {self.id} lost sight of target tree {self.target_entity.id}. Operating from memory.")
+            # --- End Memory Logic ---
             
             dist_to_tree = np.linalg.norm(self.target_entity.position - self.position)
             if dist_to_tree < self.target_entity.canopy_radius * 1.2: # Arrived at the tree
@@ -342,7 +404,8 @@ class Agent:
         # --- Searching for Apple State ---
         elif self.state == "searching_for_apple":
             self.max_speed = self.base_max_speed # Ensure speed is reset
-            visible_apples = [a for a in environment.apples if np.dot(a.position - self.position, a.position - self.position) < self.current_vision_range**2]
+            # Use the proper visibility check
+            visible_apples = [a for a in environment.apples if self._is_entity_visible(a)]
             if visible_apples:
                 self.target_entity = min(visible_apples, key=lambda a: np.linalg.norm(a.position - self.position))
                 self.state = "moving_to_apple"
@@ -354,7 +417,22 @@ class Agent:
         elif self.state == "moving_to_apple":
             if self.target_entity is None or self.target_entity not in environment.apples:
                 self.state = "searching_for_apple" # Target was eaten by someone else
+                self.target_entity = None
+                self.last_known_position = None
                 return
+
+            # --- Memory Update Logic ---
+            is_visible = self._is_entity_visible(self.target_entity)
+            if is_visible:
+                self.last_known_position = self.target_entity.position.copy()
+                self.memory_timer = self.memory_persistence_steps
+                if self.is_operating_from_memory:
+                    self.is_operating_from_memory = False
+                    logger.info(f"Agent {self.id} re-acquired target apple {self.target_entity.id}.")
+            elif self.memory_timer > 0 and not self.is_operating_from_memory:
+                self.is_operating_from_memory = True
+                logger.info(f"Agent {self.id} lost sight of target apple {self.target_entity.id}. Operating from memory.")
+            # --- End Memory Logic ---
             
             dist_to_apple = np.linalg.norm(self.target_entity.position - self.position)
 
@@ -397,6 +475,10 @@ class Agent:
         # Dead agents do nothing.
         if self.state == "dead":
             return
+
+        # --- Update Short-Term Memory Timer ---
+        if self.memory_timer > 0:
+            self.memory_timer -= 1
 
         # --- Update Sensory Acuity based on Environment ---
         light_level = environment.light_level
@@ -477,6 +559,7 @@ class Agent:
                 self.hunger = min(self.max_hunger, self.hunger + self.hunger_per_apple)
                 logger.info(f"Agent {self.id} finished eating. Hunger is now {self.hunger:.1f}.")
                 self.state = "wandering"
+                self.last_known_position = None # Clear memory after eating
             return
 
         # --- Hunger and Death ---
